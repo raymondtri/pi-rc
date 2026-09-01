@@ -3,6 +3,8 @@ import http from "node:http";
 import path from "node:path";
 
 const MAX_TRANSCRIPT = 400;
+const STALE_MS = 15_000;
+const PENDING_MS = 30_000;
 
 export function startBroker({ token, port, root, onCreateSession, onError }) {
   const sessions = new Map();
@@ -79,6 +81,7 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
         streaming: false,
         online: false,
         pending: true,
+        lastSeen: Date.now(),
       });
       broadcast({ type: "sessions", sessions: listSessions() });
       json(res, 200, { session: publicSession(pending) });
@@ -150,11 +153,8 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
 
     if (req.method === "POST" && url.pathname === "/api/agent/bye") {
       const body = await readJson(req);
-      const session = sessions.get(body.id);
-      if (session) {
-        session.online = false;
-        session.streaming = false;
-        broadcast({ type: "status", sessionId: session.id, streaming: false, online: false });
+      if (body.id && sessions.delete(body.id)) {
+        broadcast({ type: "sessions", sessions: listSessions() });
       }
       json(res, 200, { ok: true });
       return;
@@ -267,12 +267,19 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
     }
   }
 
-  function listSessions() {
+  function pruneStale() {
     const now = Date.now();
-    return [...sessions.values()].map((s) => {
-      if (s.online && s.lastSeen && now - s.lastSeen > 15000) s.online = false;
-      return publicSession(s);
-    });
+    for (const [id, s] of sessions) {
+      const age = now - (s.lastSeen || 0);
+      const deadHeartbeat = !s.pending && age > STALE_MS;
+      const deadPending = s.pending && age > PENDING_MS;
+      if (deadHeartbeat || deadPending) sessions.delete(id);
+    }
+  }
+
+  function listSessions() {
+    pruneStale();
+    return [...sessions.values()].map(publicSession);
   }
 
   function publicSession(s) {
