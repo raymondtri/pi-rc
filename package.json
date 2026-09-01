@@ -1,0 +1,24 @@
+{
+  "name": "pi-rc",
+  "version": "0.1.0",
+  "description": "Boot Zellij + Pi on the desktop, scan a QR from your phone over Tailscale.",
+  "type": "module",
+  "bin": {
+    "pi-rc": "./src/cli.mjs"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs serve",
+    "pi-rc": "node src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extension/index.ts"]
+  },
+  "keywords": ["pi-package"],
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0"
+  }
+}

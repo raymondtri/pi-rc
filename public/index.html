@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#09090b" />
+    <title>pi-rc</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --panel: #18181b;
+        --line: #27272a;
+        --text: #fafafa;
+        --muted: #a1a1aa;
+        --accent: #22c55e;
+        --user: #3b82f6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.4 system-ui, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      }
+      header {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0.75rem;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      select,
+      button,
+      textarea {
+        font: inherit;
+        color: inherit;
+      }
+      select {
+        flex: 1;
+        min-width: 0;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.55rem 0.6rem;
+      }
+      button {
+        background: var(--accent);
+        color: #052e16;
+        border: 0;
+        border-radius: 8px;
+        padding: 0.55rem 0.75rem;
+        font-weight: 650;
+      }
+      button.ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+      main {
+        flex: 1;
+        overflow: auto;
+        padding: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+      }
+      .msg {
+        max-width: 92%;
+        padding: 0.65rem 0.75rem;
+        border-radius: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .user {
+        align-self: flex-end;
+        background: #1d4ed8;
+      }
+      .assistant {
+        align-self: flex-start;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      .tool,
+      .meta {
+        align-self: center;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+      .empty {
+        margin: auto;
+        color: var(--muted);
+        text-align: center;
+        padding: 1rem;
+      }
+      form {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+      }
+      textarea {
+        flex: 1;
+        resize: none;
+        min-height: 44px;
+        max-height: 8rem;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.65rem 0.75rem;
+      }
+      .dot {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 99px;
+        background: #52525b;
+        flex: none;
+      }
+      .dot.on {
+        background: var(--accent);
+      }
+      .dot.busy {
+        background: #eab308;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span id="dot" class="dot"></span>
+      <select id="sessions"></select>
+      <button id="abort" class="ghost" type="button">stop</button>
+      <button id="create" type="button">new</button>
+    </header>
+    <main id="log">
+      <p class="empty">Scan worked. Open or create a Pi session on the desktop — this is chat, not the TUI.</p>
+    </main>
+    <form id="form">
+      <textarea id="input" rows="1" placeholder="Message Pi…" enterkeyhint="send"></textarea>
+      <button type="submit">send</button>
+    </form>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const token = params.get("t") || sessionStorage.getItem("pi-rc-token") || "";
+      if (params.get("t")) {
+        sessionStorage.setItem("pi-rc-token", token);
+        history.replaceState(null, "", location.pathname);
+      }
+
+      const state = { sessions: [], current: null };
+      const $ = (id) => document.getElementById(id);
+      const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+      function renderSelect() {
+        const sel = $("sessions");
+        const current = state.current;
+        sel.innerHTML = "";
+        if (!state.sessions.length) {
+          const opt = document.createElement("option");
+          opt.textContent = "no sessions";
+          sel.append(opt);
+          return;
+        }
+        for (const s of state.sessions) {
+          const opt = document.createElement("option");
+          opt.value = s.id;
+          const flag = s.pending ? "starting" : s.online ? (s.streaming ? "busy" : "live") : "offline";
+          opt.textContent = `${s.name || s.id} · ${flag}`;
+          sel.append(opt);
+        }
+        if (current && state.sessions.some((s) => s.id === current)) sel.value = current;
+        else state.current = sel.value;
+        const s = state.sessions.find((x) => x.id === state.current);
+        $("dot").className = "dot" + (s?.streaming ? " busy" : s?.online ? " on" : "");
+      }
+
+      function renderLog() {
+        const s = state.sessions.find((x) => x.id === state.current);
+        const log = $("log");
+        log.innerHTML = "";
+        if (!s) {
+          log.innerHTML =
+            '<p class="empty">No live Pi yet. Tap new to boot a desktop terminal, or open Pi there with this extension loaded.</p>';
+          return;
+        }
+        if (s.pending || !s.online) {
+          log.innerHTML = `<p class="empty">${s.pending ? "Starting on the desktop…" : "Pi is offline."}<br/>${s.cwd || ""}</p>`;
+          return;
+        }
+        if (!s.transcript?.length) {
+          log.innerHTML = `<p class="empty">${s.cwd || ""}<br/>live. type below.</p>`;
+          return;
+        }
+        for (const msg of s.transcript) {
+          const div = document.createElement("div");
+          div.className = "msg " + (msg.role || "meta");
+          div.textContent = msg.text;
+          log.append(div);
+        }
+        log.scrollTop = log.scrollHeight;
+      }
+
+      function pickCurrent(list) {
+        const cur = list.find((s) => s.id === state.current);
+        if (cur && !cur.pending) return cur.id;
+        if (cur?.pending) {
+          const live = list.find(
+            (s) => !s.pending && (s.name === cur.name || s.cwd === cur.cwd),
+          );
+          if (live) return live.id;
+        }
+        const live = list.find((s) => s.online && !s.pending) || list.find((s) => !s.pending);
+        return (live || cur || list[0])?.id || null;
+      }
+
+      function applySessions(list) {
+        state.sessions = list || [];
+        state.current = pickCurrent(state.sessions);
+        renderSelect();
+        renderLog();
+      }
+
+      function onEvent(ev) {
+        if (ev.type === "sessions") {
+          applySessions(ev.sessions);
+          return;
+        }
+        const s = state.sessions.find((x) => x.id === ev.sessionId);
+        if (!s) return;
+        if (ev.type === "user") s.transcript.push({ role: "user", text: ev.text });
+        if (ev.type === "delta") {
+          const last = s.transcript[s.transcript.length - 1];
+          if (last?.role === "assistant" && last.live) last.text += ev.text;
+          else s.transcript.push({ role: "assistant", text: ev.text, live: true });
+          s.streaming = true;
+          s.online = true;
+        }
+        if (ev.type === "tool") s.transcript.push({ role: "tool", text: `${ev.phase} ${ev.name}` });
+        if (ev.type === "status") {
+          s.streaming = ev.streaming;
+          s.online = ev.online;
+          if (ev.model) s.model = ev.model;
+        }
+        if (ev.type === "turn_end") {
+          s.streaming = false;
+          const last = s.transcript[s.transcript.length - 1];
+          if (last) last.live = false;
+        }
+        renderSelect();
+        if (ev.sessionId === state.current) renderLog();
+      }
+
+      async function api(path, opts = {}) {
+        const res = await fetch(path, { headers, ...opts });
+        if (res.status === 401) throw new Error("bad token — rescan the QR");
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || res.statusText);
+        return body;
+      }
+
+      $("sessions").onchange = () => {
+        state.current = $("sessions").value;
+        renderLog();
+      };
+
+      $("form").onsubmit = async (e) => {
+        e.preventDefault();
+        const text = $("input").value.trim();
+        if (!text || !state.current) return;
+        $("input").value = "";
+        try {
+          await api(`/api/sessions/${encodeURIComponent(state.current)}/prompt`, {
+            method: "POST",
+            body: JSON.stringify({ text }),
+          });
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+
+      $("input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          $("form").requestSubmit();
+        }
+      });
+
+      $("abort").onclick = async () => {
+        if (!state.current) return;
+        try {
+          await api(`/api/sessions/${encodeURIComponent(state.current)}/abort`, { method: "POST" });
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+
+      $("create").onclick = async () => {
+        const name = prompt("Session name?", `pi-${Math.random().toString(36).slice(2, 6)}`);
+        if (name === null) return;
+        const created = await api("/api/sessions", {
+          method: "POST",
+          body: JSON.stringify({ name }),
+        });
+        state.current = created.session.id;
+      };
+
+      if (!token) {
+        $("log").innerHTML = '<p class="empty">Missing token. Rescan the QR from the desktop.</p>';
+      } else {
+        api("/api/sessions").then((d) => applySessions(d.sessions)).catch((err) => {
+          $("log").innerHTML = `<p class="empty">${err.message}</p>`;
+        });
+        const es = new EventSource(`/api/stream?t=${encodeURIComponent(token)}`);
+        es.onmessage = (m) => {
+          try {
+            onEvent(JSON.parse(m.data));
+          } catch {}
+        };
+      }
+    </script>
+  </body>
+</html>
