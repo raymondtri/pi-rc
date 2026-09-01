@@ -227,7 +227,7 @@
           const opt = document.createElement("option");
           opt.value = s.id;
           const flag = s.pending ? "starting" : s.online ? (s.streaming ? "busy" : "live") : "offline";
-          opt.textContent = `${s.name || s.id} · ${flag}`;
+          opt.textContent = `${s.name || s.id} · ${flag}${s.managed ? "" : " · other"}`;
           sel.append(opt);
         }
         if (current && state.sessions.some((s) => s.id === current)) sel.value = current;
@@ -278,21 +278,25 @@
       }
 
       function pickCurrent(list) {
-        const cur = list.find((s) => s.id === state.current);
+        const stored = sessionStorage.getItem("pi-rc-session");
+        const wanted = state.current || stored;
+        const cur = list.find((s) => s.id === wanted);
         if (cur && !cur.pending) return cur.id;
         if (cur?.pending) {
           const live = list.find(
-            (s) => !s.pending && (s.name === cur.name || s.cwd === cur.cwd),
+            (s) => !s.pending && (s.managed || s.name === cur.name || s.cwd === cur.cwd),
           );
           if (live) return live.id;
         }
+        const managed = list.find((s) => s.online && s.managed && !s.pending);
         const live = list.find((s) => s.online && !s.pending) || list.find((s) => !s.pending);
-        return (live || cur || list[0])?.id || null;
+        return (managed || live || cur || list[0])?.id || null;
       }
 
       function applySessions(list) {
         state.sessions = list || [];
         state.current = pickCurrent(state.sessions);
+        if (state.current) sessionStorage.setItem("pi-rc-session", state.current);
         const s = state.sessions.find((x) => x.id === state.current);
         if (s?.ui) openSheet(s.ui);
         renderSelect();
@@ -402,6 +406,7 @@
 
       $("sessions").onchange = () => {
         state.current = $("sessions").value;
+        if (state.current) sessionStorage.setItem("pi-rc-session", state.current);
         renderLog();
         renderBar();
       };

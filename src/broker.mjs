@@ -170,9 +170,11 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
         pending: false,
         lastSeen: Date.now(),
         footer: body.footer || undefined,
+        managed: Boolean(body.managed),
       });
       if (body.footer) session.footer = body.footer;
       if (body.name) session.name = body.name;
+      session.managed = Boolean(body.managed);
       if (Array.isArray(body.commands)) session.commands = body.commands;
       adoptPending(session);
       if (!existed) broadcast({ type: "sessions", sessions: listSessions() });
@@ -354,6 +356,7 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
       footer: s.footer || null,
       ui: s.ui || null,
       commands: s.commands || [],
+      managed: Boolean(s.managed),
     };
   }
 

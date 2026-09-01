@@ -80,6 +80,7 @@ export default function (pi: any) {
       streaming: !ctx.isIdle?.(),
       footer: footerOf(ctx),
       commands: commandList(),
+      managed: Boolean(process.env.PI_RC_NAME || process.env.ZELLIJ),
     });
     if (typeof data?.watchers === "number") watchers = data.watchers;
   };
