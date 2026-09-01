@@ -124,6 +124,30 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
       return;
     }
 
+    const uiMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/ui$/);
+    if (req.method === "POST" && uiMatch) {
+      const session = sessions.get(decodeURIComponent(uiMatch[1]));
+      if (!session) {
+        json(res, 404, { error: "unknown session" });
+        return;
+      }
+      const body = await readJson(req);
+      const pickId = String(body.pickId || body.id || "");
+      if (!pickId || !session.uiPending?.has(pickId)) {
+        json(res, 404, { error: "unknown picker" });
+        return;
+      }
+      session.uiPending.set(pickId, {
+        ...session.uiPending.get(pickId),
+        pending: false,
+        value: body.value,
+        cancel: Boolean(body.cancel),
+      });
+      session.ui = null;
+      json(res, 200, { ok: true });
+      return;
+    }
+
     json(res, 404, { error: "not found" });
   }
 
@@ -134,6 +158,7 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
         json(res, 400, { error: "id required" });
         return;
       }
+      const existed = sessions.has(String(body.id));
       const session = upsertSession({
         id: String(body.id),
         name: body.name || body.id,
@@ -144,10 +169,16 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
         online: true,
         pending: false,
         lastSeen: Date.now(),
+        footer: body.footer || undefined,
       });
+      if (body.footer) session.footer = body.footer;
+      if (body.name) session.name = body.name;
       adoptPending(session);
-      broadcast({ type: "sessions", sessions: listSessions() });
-      json(res, 200, { ok: true, sessionId: session.id });
+      if (!existed) broadcast({ type: "sessions", sessions: listSessions() });
+      else if (body.footer) {
+        broadcast({ type: "footer", sessionId: session.id, footer: body.footer, name: session.name });
+      }
+      json(res, 200, { ok: true, sessionId: session.id, watchers: sse.size });
       return;
     }
 
@@ -196,6 +227,14 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
         append(session, { role: "meta", text: "stopped" });
         broadcast({ type: "status", sessionId: session.id, streaming: false, online: true });
         broadcast({ type: "tool", sessionId: session.id, name: "stop", phase: "end" });
+      } else if (body.type === "echo") {
+        append(session, { role: "meta", text: body.text });
+        broadcast({ type: "echo", sessionId: session.id, text: body.text });
+      } else if (body.type === "ui") {
+        if (!session.uiPending) session.uiPending = new Map();
+        session.uiPending.set(body.pick.id, { ...body.pick, pending: true });
+        session.ui = body.pick;
+        broadcast({ type: "ui", sessionId: session.id, pick: body.pick });
       }
       json(res, 200, { ok: true });
       return;
@@ -218,6 +257,18 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/agent/ui") {
+      const session = sessions.get(url.searchParams.get("sessionId"));
+      const pickId = url.searchParams.get("pickId");
+      const pick = session?.uiPending?.get(pickId);
+      if (!pick) {
+        json(res, 200, { pending: true });
+        return;
+      }
+      json(res, 200, pick.pending === false ? { pending: false, value: pick.value, cancel: pick.cancel } : { pending: true });
+      return;
+    }
+
     json(res, 404, { error: "not found" });
   }
 
@@ -231,6 +282,7 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
     const next = { ...prev, ...fields };
     if (!next.transcript) next.transcript = [];
     if (!next.inbox) next.inbox = [];
+    if (!next.uiPending) next.uiPending = new Map();
     sessions.set(next.id, next);
     return next;
   }
@@ -292,6 +344,8 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
       online: Boolean(s.online),
       pending: Boolean(s.pending),
       transcript: s.transcript || [],
+      footer: s.footer || null,
+      ui: s.ui || null,
     };
   }
 

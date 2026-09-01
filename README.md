@@ -90,6 +90,21 @@ Desktop terminal:  zellij attach  -->  pi  +  pi-rc extension
 
 Sending a message on the phone calls `pi.sendUserMessage` in the live TUI. **stop** is Escape-equivalent (`ctx.abort()`).
 
+The footer mirrors Pi’s status line: session name, cwd, model, thinking, context %, cost.
+
+Slash commands from the phone:
+
+| Command | What happens |
+|---|---|
+| `/model` | Remote picker (or `/model provider/id`) |
+| `/thinking` | Remote picker (or `/thinking high`) |
+| `/name` | Sets the session name |
+| `/compact` | Compacts context |
+| `/help` | Lists the above |
+| `/skill:…`, templates | Expanded via Pi (`expandPromptTemplates`) |
+
+Builtin TUI pickers (`/settings`, `/tree`) still live on the desktop. Extension commands that use `ctx.ui.select` / `confirm` / `input` are forwarded to the phone when a watcher is connected.
+
 ## Auth and network
 
 - Bind is localhost. The only remote path is Tailscale Serve (your tailnet).

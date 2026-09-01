@@ -18,13 +18,9 @@
         --text: #fafafa;
         --muted: #a1a1aa;
         --accent: #22c55e;
-        --user: #3b82f6;
       }
-      * {
-        box-sizing: border-box;
-      }
-      html,
-      body {
+      * { box-sizing: border-box; }
+      html, body {
         margin: 0;
         height: 100%;
         background: var(--bg);
@@ -36,28 +32,33 @@
         flex-direction: column;
         padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
       }
-      header {
+      header, form, #bar {
         display: flex;
         gap: 0.5rem;
         align-items: center;
         padding: 0.75rem;
-        border-bottom: 1px solid var(--line);
         background: var(--panel);
       }
-      select,
-      button,
-      textarea {
+      header { border-bottom: 1px solid var(--line); }
+      form, #bar { border-top: 1px solid var(--line); }
+      #bar {
+        font-size: 0.75rem;
+        color: var(--muted);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      select, button, textarea, input {
         font: inherit;
         color: inherit;
       }
-      select {
-        flex: 1;
-        min-width: 0;
+      select, textarea, input {
         background: var(--bg);
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 0.55rem 0.6rem;
       }
+      select { flex: 1; min-width: 0; }
       button {
         background: var(--accent);
         color: #052e16;
@@ -86,17 +87,13 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
-      .user {
-        align-self: flex-end;
-        background: #1d4ed8;
-      }
+      .user { align-self: flex-end; background: #1d4ed8; }
       .assistant {
         align-self: flex-start;
         background: var(--panel);
         border: 1px solid var(--line);
       }
-      .tool,
-      .meta {
+      .tool, .meta {
         align-self: center;
         color: var(--muted);
         font-size: 0.8rem;
@@ -107,22 +104,11 @@
         text-align: center;
         padding: 1rem;
       }
-      form {
-        display: flex;
-        gap: 0.5rem;
-        padding: 0.75rem;
-        border-top: 1px solid var(--line);
-        background: var(--panel);
-      }
-      textarea {
+      form textarea {
         flex: 1;
         resize: none;
         min-height: 44px;
         max-height: 8rem;
-        background: var(--bg);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 0.65rem 0.75rem;
       }
       .dot {
         width: 0.55rem;
@@ -131,11 +117,41 @@
         background: #52525b;
         flex: none;
       }
-      .dot.on {
-        background: var(--accent);
+      .dot.on { background: var(--accent); }
+      .dot.busy { background: #eab308; }
+      #sheet {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.6);
+        padding: 12vh 0.75rem 0;
+        z-index: 5;
       }
-      .dot.busy {
-        background: #eab308;
+      #sheet.open { display: block; }
+      #sheet .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px 16px 0 0;
+        max-height: 88vh;
+        display: flex;
+        flex-direction: column;
+        padding: 1rem;
+        margin: 0 auto;
+        max-width: 40rem;
+      }
+      #sheet h2 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+      #sheet .opts {
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin: 0.75rem 0;
+      }
+      #sheet .opt {
+        text-align: left;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--line);
       }
     </style>
   </head>
@@ -149,10 +165,22 @@
     <main id="log">
       <p class="empty">Scan worked. Open or create a Pi session on the desktop — this is chat, not the TUI.</p>
     </main>
+    <div id="bar"></div>
     <form id="form">
-      <textarea id="input" rows="1" placeholder="Message Pi…" enterkeyhint="send"></textarea>
+      <textarea id="input" rows="1" placeholder="Message Pi…  /model /thinking /name" enterkeyhint="send"></textarea>
       <button type="submit">send</button>
     </form>
+    <div id="sheet">
+      <div class="card">
+        <h2 id="sheet-title">Pick</h2>
+        <p id="sheet-msg" class="meta"></p>
+        <input id="sheet-filter" placeholder="filter" />
+        <div class="opts" id="sheet-opts"></div>
+        <input id="sheet-ask" placeholder="" />
+        <button id="sheet-ok" type="button">ok</button>
+        <button id="sheet-cancel" class="ghost" type="button">cancel</button>
+      </div>
+    </div>
     <script>
       const params = new URLSearchParams(location.search);
       const token = params.get("t") || sessionStorage.getItem("pi-rc-token") || "";
@@ -161,7 +189,7 @@
         history.replaceState(null, "", location.pathname);
       }
 
-      const state = { sessions: [], current: null };
+      const state = { sessions: [], current: null, pick: null };
       const $ = (id) => document.getElementById(id);
       const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 
@@ -173,6 +201,7 @@
           const opt = document.createElement("option");
           opt.textContent = "no sessions";
           sel.append(opt);
+          renderBar();
           return;
         }
         for (const s of state.sessions) {
@@ -186,6 +215,21 @@
         else state.current = sel.value;
         const s = state.sessions.find((x) => x.id === state.current);
         $("dot").className = "dot" + (s?.streaming ? " busy" : s?.online ? " on" : "");
+        renderBar();
+      }
+
+      function renderBar() {
+        const s = state.sessions.find((x) => x.id === state.current);
+        const f = s?.footer || {};
+        const parts = [
+          f.name || s?.name,
+          f.cwd || s?.cwd,
+          f.model,
+          f.thinking && f.thinking !== "off" ? f.thinking : null,
+          f.percent != null ? `${Math.round(f.percent)}%` : null,
+          f.cost ? `$${Number(f.cost).toFixed(2)}` : null,
+        ].filter(Boolean);
+        $("bar").textContent = parts.join(" · ");
       }
 
       function renderLog() {
@@ -202,7 +246,7 @@
           return;
         }
         if (!s.transcript?.length) {
-          log.innerHTML = `<p class="empty">${s.cwd || ""}<br/>live. type below.</p>`;
+          log.innerHTML = `<p class="empty">${s.cwd || ""}<br/>live. /model /thinking /name</p>`;
           return;
         }
         for (const msg of s.transcript) {
@@ -230,8 +274,60 @@
       function applySessions(list) {
         state.sessions = list || [];
         state.current = pickCurrent(state.sessions);
+        const s = state.sessions.find((x) => x.id === state.current);
+        if (s?.ui) openSheet(s.ui);
         renderSelect();
         renderLog();
+      }
+
+      function openSheet(pick) {
+        state.pick = pick;
+        $("sheet").classList.add("open");
+        $("sheet-title").textContent = pick.title || "Pick";
+        $("sheet-msg").textContent = pick.message || "";
+        $("sheet-filter").value = "";
+        $("sheet-ask").value = "";
+        const isAsk = pick.kind === "ask";
+        $("sheet-filter").style.display = isAsk ? "none" : "block";
+        $("sheet-opts").style.display = isAsk ? "none" : "flex";
+        $("sheet-ask").style.display = isAsk ? "block" : "none";
+        $("sheet-ok").style.display = isAsk ? "block" : "none";
+        renderSheetOpts();
+        if (isAsk) $("sheet-ask").focus();
+        else $("sheet-filter").focus();
+      }
+
+      function closeSheet() {
+        state.pick = null;
+        $("sheet").classList.remove("open");
+      }
+
+      function renderSheetOpts() {
+        const pick = state.pick;
+        if (!pick || pick.kind === "ask") return;
+        const q = $("sheet-filter").value.trim().toLowerCase();
+        const box = $("sheet-opts");
+        box.innerHTML = "";
+        for (const opt of pick.options || []) {
+          const label = opt.label || opt.id;
+          if (q && !label.toLowerCase().includes(q) && !String(opt.id).toLowerCase().includes(q)) continue;
+          const btn = document.createElement("button");
+          btn.className = "opt";
+          btn.type = "button";
+          btn.textContent = label;
+          btn.onclick = () => answerUi(opt.id);
+          box.append(btn);
+        }
+      }
+
+      async function answerUi(value, cancel = false) {
+        const pick = state.pick;
+        if (!pick || !state.current) return;
+        closeSheet();
+        await api(`/api/sessions/${encodeURIComponent(state.current)}/ui`, {
+          method: "POST",
+          body: JSON.stringify({ pickId: pick.id, value, cancel }),
+        });
       }
 
       function onEvent(ev) {
@@ -239,9 +335,20 @@
           applySessions(ev.sessions);
           return;
         }
+        if (ev.type === "ui") {
+          if (ev.sessionId === state.current || !state.current) openSheet(ev.pick);
+          return;
+        }
         const s = state.sessions.find((x) => x.id === ev.sessionId);
         if (!s) return;
+        if (ev.type === "footer") {
+          s.footer = ev.footer;
+          if (ev.name) s.name = ev.name;
+          renderSelect();
+          return;
+        }
         if (ev.type === "user") s.transcript.push({ role: "user", text: ev.text });
+        if (ev.type === "echo") s.transcript.push({ role: "meta", text: ev.text });
         if (ev.type === "delta") {
           const last = s.transcript[s.transcript.length - 1];
           if (last?.role === "assistant" && last.live) last.text += ev.text;
@@ -275,7 +382,17 @@
       $("sessions").onchange = () => {
         state.current = $("sessions").value;
         renderLog();
+        renderBar();
       };
+      $("sheet-filter").oninput = renderSheetOpts;
+      $("sheet-cancel").onclick = () => answerUi(undefined, true);
+      $("sheet-ok").onclick = () => answerUi($("sheet-ask").value);
+      $("sheet-ask").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          answerUi($("sheet-ask").value);
+        }
+      });
 
       $("form").onsubmit = async (e) => {
         e.preventDefault();
