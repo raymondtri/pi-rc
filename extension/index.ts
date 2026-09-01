@@ -79,6 +79,7 @@ export default function (pi: any) {
       model: ctx.model?.id,
       streaming: !ctx.isIdle?.(),
       footer: footerOf(ctx),
+      commands: commandList(),
     });
     if (typeof data?.watchers === "number") watchers = data.watchers;
   };
@@ -148,6 +149,28 @@ export default function (pi: any) {
       }
       return origInput?.(title, placeholder, opts);
     };
+  };
+
+  const commandList = () => {
+    const ours = [
+      { name: "model", description: "Switch model" },
+      { name: "thinking", description: "Thinking level" },
+      { name: "name", description: "Rename session" },
+      { name: "compact", description: "Compact context" },
+      { name: "help", description: "Phone slash commands" },
+    ];
+    const rest = (pi.getCommands?.() || []).map((c: any) => ({
+      name: String(c.name || "").replace(/^\//, ""),
+      description: c.description || "",
+    }));
+    const seen = new Set<string>();
+    const out: { name: string; description: string }[] = [];
+    for (const c of [...ours, ...rest]) {
+      if (!c.name || seen.has(c.name)) continue;
+      seen.add(c.name);
+      out.push(c);
+    }
+    return out;
   };
 
   const modelsOf = (ctx: any) => {

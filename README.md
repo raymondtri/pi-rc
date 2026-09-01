@@ -103,6 +103,8 @@ Slash commands from the phone:
 | `/help` | Lists the above |
 | `/skill:…`, templates | Expanded via Pi (`expandPromptTemplates`) |
 
+Type `/` in the phone composer for autocomplete (Pi commands + the ones above). Tap `/model` to open the picker immediately.
+
 Builtin TUI pickers (`/settings`, `/tree`) still live on the desktop. Extension commands that use `ctx.ui.select` / `confirm` / `input` are forwarded to the phone when a watcher is connected.
 
 ## Auth and network

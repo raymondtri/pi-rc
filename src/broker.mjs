@@ -173,10 +173,17 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
       });
       if (body.footer) session.footer = body.footer;
       if (body.name) session.name = body.name;
+      if (Array.isArray(body.commands)) session.commands = body.commands;
       adoptPending(session);
       if (!existed) broadcast({ type: "sessions", sessions: listSessions() });
-      else if (body.footer) {
-        broadcast({ type: "footer", sessionId: session.id, footer: body.footer, name: session.name });
+      else if (body.footer || body.commands) {
+        broadcast({
+          type: "footer",
+          sessionId: session.id,
+          footer: session.footer,
+          name: session.name,
+          commands: session.commands || [],
+        });
       }
       json(res, 200, { ok: true, sessionId: session.id, watchers: sse.size });
       return;
@@ -346,6 +353,7 @@ export function startBroker({ token, port, root, onCreateSession, onError }) {
       transcript: s.transcript || [],
       footer: s.footer || null,
       ui: s.ui || null,
+      commands: s.commands || [],
     };
   }
 

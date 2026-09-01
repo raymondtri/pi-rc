@@ -40,7 +40,25 @@
         background: var(--panel);
       }
       header { border-bottom: 1px solid var(--line); }
-      form, #bar { border-top: 1px solid var(--line); }
+      form, #bar, #ac { border-top: 1px solid var(--line); }
+      #ac {
+        display: none;
+        flex-direction: column;
+        max-height: 40vh;
+        overflow: auto;
+        background: var(--panel);
+        padding: 0.35rem 0.5rem;
+        gap: 0.25rem;
+      }
+      #ac.open { display: flex; }
+      #ac button {
+        text-align: left;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--line);
+        font-weight: 500;
+      }
+      #ac small { color: var(--muted); font-weight: 400; }
       #bar {
         font-size: 0.75rem;
         color: var(--muted);
@@ -166,6 +184,7 @@
       <p class="empty">Scan worked. Open or create a Pi session on the desktop — this is chat, not the TUI.</p>
     </main>
     <div id="bar"></div>
+    <div id="ac"></div>
     <form id="form">
       <textarea id="input" rows="1" placeholder="Message Pi…  /model /thinking /name" enterkeyhint="send"></textarea>
       <button type="submit">send</button>
@@ -344,7 +363,9 @@
         if (ev.type === "footer") {
           s.footer = ev.footer;
           if (ev.name) s.name = ev.name;
+          if (ev.commands) s.commands = ev.commands;
           renderSelect();
+          renderAc();
           return;
         }
         if (ev.type === "user") s.transcript.push({ role: "user", text: ev.text });
@@ -399,6 +420,7 @@
         const text = $("input").value.trim();
         if (!text || !state.current) return;
         $("input").value = "";
+        $("ac").classList.remove("open");
         try {
           await api(`/api/sessions/${encodeURIComponent(state.current)}/prompt`, {
             method: "POST",
@@ -409,6 +431,51 @@
         }
       };
 
+      const PICKER_CMDS = new Set(["model", "thinking", "name", "compact", "help"]);
+
+      function renderAc() {
+        const box = $("ac");
+        const raw = $("input").value;
+        if (!raw.startsWith("/") || raw.includes(" ")) {
+          box.classList.remove("open");
+          box.innerHTML = "";
+          return;
+        }
+        const q = raw.slice(1).toLowerCase();
+        const s = state.sessions.find((x) => x.id === state.current);
+        const cmds = s?.commands || [];
+        const hits = cmds.filter(
+          (c) => !q || c.name.toLowerCase().startsWith(q) || c.name.toLowerCase().includes(q),
+        ).slice(0, 30);
+        box.innerHTML = "";
+        if (!hits.length) {
+          box.classList.remove("open");
+          return;
+        }
+        for (const c of hits) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          const strong = document.createElement("strong");
+          strong.textContent = "/" + c.name + " ";
+          const small = document.createElement("small");
+          small.textContent = c.description || "";
+          btn.append(strong, small);
+          btn.onclick = () => {
+            $("input").value = "/" + c.name;
+            box.classList.remove("open");
+            if (PICKER_CMDS.has(c.name)) $("form").requestSubmit();
+            else {
+              $("input").value = "/" + c.name + " ";
+              $("input").focus();
+            }
+          };
+          box.append(btn);
+        }
+        box.classList.add("open");
+      }
+
+      $("input").addEventListener("input", renderAc);
+      $("input").addEventListener("focus", renderAc);
       $("input").addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
